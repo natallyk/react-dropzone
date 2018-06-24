@@ -124,5 +124,5 @@
       "path": "@commitlint/prompt"
     }
   },
-  "version": "0.0.0-development"
+  "version": "0.0.1-development"
 }
