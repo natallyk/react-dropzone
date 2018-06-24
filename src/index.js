@@ -2,6 +2,7 @@
 
 import React from 'react'
 import PropTypes from 'prop-types'
+import EXIF from 'exif-js';
 import {
   supportMultiple,
   fileAccepted,
@@ -14,6 +15,7 @@ import {
 import styles from './utils/styles'
 
 class Dropzone extends React.Component {
+
   constructor(props, context) {
     super(props, context)
     this.composeHandlers = this.composeHandlers.bind(this)
@@ -38,6 +40,38 @@ class Dropzone extends React.Component {
       rejectedFiles: []
     }
   }
+    static resetImageOrientation(image, callback) {
+        const img = new Image();
+        img.onload = () => {
+            EXIF.getData(img, function orientationReset() {
+                const width = img.width;
+                const height = img.height;
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const srcOrientation = EXIF.getTag(this, 'Orientation');
+                if ([5, 6, 7, 8].indexOf(srcOrientation) > -1) {
+                    canvas.width = height;
+                    canvas.height = width;
+                } else {
+                    canvas.width = width;
+                    canvas.height = height;
+                }
+                switch (srcOrientation) {
+                    case 2: ctx.transform(-1, 0, 0, 1, width, 0); break;
+                    case 3: ctx.transform(-1, 0, 0, -1, width, height); break;
+                    case 4: ctx.transform(1, 0, 0, -1, 0, height); break;
+                    case 5: ctx.transform(0, 1, 1, 0, 0, 0); break;
+                    case 6: ctx.transform(0, 1, -1, 0, height, 0); break;
+                    case 7: ctx.transform(0, -1, -1, 0, height, width); break;
+                    case 8: ctx.transform(0, -1, 1, 0, 0, width); break;
+                    default: ctx.transform(1, 0, 0, 1, 0, 0);
+                }
+                ctx.drawImage(img, 0, 0);
+                canvas.toBlob(blob => callback(URL.createObjectURL(blob)));
+            });
+        };
+        img.src = URL.createObjectURL(image);
+    }
 
   componentDidMount() {
     const { preventDropOnDocument } = this.props
@@ -143,6 +177,8 @@ class Dropzone extends React.Component {
     }
   }
 
+
+
   onDrop(evt) {
     const { onDrop, onDropAccepted, onDropRejected, multiple, disablePreview, accept } = this.props
     const fileList = getDataTransferItems(evt)
@@ -157,44 +193,39 @@ class Dropzone extends React.Component {
     this.isFileDialogActive = false
 
     fileList.forEach(file => {
-      if (!disablePreview) {
-        try {
-          file.preview = window.URL.createObjectURL(file) // eslint-disable-line no-param-reassign
-        } catch (err) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.error('Failed to generate preview for file', file, err) // eslint-disable-line no-console
+        Dropzone.resetImageOrientation(file, (blob) => {
+            if (!disablePreview) {
+                file.preview = blob; // eslint-disable-line no-param-reassign
+            }
+
+          if (
+            fileAccepted(file, accept) &&
+            fileMatchSize(file, this.props.maxSize, this.props.minSize)
+          ) {
+            acceptedFiles.push(file)
+          } else {
+            rejectedFiles.push(file)
           }
+        })
+
+        if (!multiple) {
+          // if not in multi mode add any extra accepted files to rejected.
+          // This will allow end users to easily ignore a multi file drop in "single" mode.
+          rejectedFiles.push(...acceptedFiles.splice(1))
         }
-      }
 
-      if (
-        fileAccepted(file, accept) &&
-        fileMatchSize(file, this.props.maxSize, this.props.minSize)
-      ) {
-        acceptedFiles.push(file)
-      } else {
-        rejectedFiles.push(file)
-      }
-    })
+        if (onDrop) {
+          onDrop.call(this, acceptedFiles, rejectedFiles, evt)
+        }
 
-    if (!multiple) {
-      // if not in multi mode add any extra accepted files to rejected.
-      // This will allow end users to easily ignore a multi file drop in "single" mode.
-      rejectedFiles.push(...acceptedFiles.splice(1))
-    }
+        if (rejectedFiles.length > 0 && onDropRejected) {
+          onDropRejected.call(this, rejectedFiles, evt)
+        }
 
-    if (onDrop) {
-      onDrop.call(this, acceptedFiles, rejectedFiles, evt)
-    }
-
-    if (rejectedFiles.length > 0 && onDropRejected) {
-      onDropRejected.call(this, rejectedFiles, evt)
-    }
-
-    if (acceptedFiles.length > 0 && onDropAccepted) {
-      onDropAccepted.call(this, acceptedFiles, evt)
-    }
-
+        if (acceptedFiles.length > 0 && onDropAccepted) {
+          onDropAccepted.call(this, acceptedFiles, evt)
+        }
+    });
     // Clear files value
     this.draggedFiles = null
 
